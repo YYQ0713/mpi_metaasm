@@ -62,7 +62,7 @@ KmerCounter::MemoryStat KmerCounter::Initialize() {
   bool is_reverse = true;
 
   int64_t num_bases, num_reads;
-  SequenceLibCollection seq_collection(opt_.read_lib_path());
+  SequenceLibCollection seq_collection(opt_.read_lib_file);
   auto collection_size = seq_collection.GetSize();
   num_bases = collection_size.first;
   num_reads = collection_size.second;
@@ -90,14 +90,14 @@ KmerCounter::MemoryStat KmerCounter::Initialize() {
       std::vector<AtomicWrapper<uint32_t>>(seq_pkg_.seq_count(), 0xFFFFFFFFU);
 
   // --- initialize stat ---
-  edge_counter_.SetNumThreads(opt_.num_cpu_threads);
+  edge_counter_.SetNumThreads(opt_.n_threads);
 
   // --- initialize writer ---
-  edge_writer_.SetFilePrefix(opt_.kmerc_output_prefix);
-  edge_writer_.SetNumThreads(opt_.num_cpu_threads);
+  edge_writer_.SetFilePrefix(opt_.output_prefix);
+  edge_writer_.SetNumThreads(opt_.n_threads);
   edge_writer_.SetKmerSize(opt_.k);
   edge_writer_.SetNumBuckets(kNumBuckets);
-  edge_writer_.InitFiles();
+  edge_writer_.InitFiles(mpienv_);
 
   int64_t memory_for_data = seq_pkg_.size_in_byte() +
                             +seq_pkg_.seq_count() * sizeof(first_0_out_[0]) *
@@ -296,16 +296,16 @@ void KmerCounter::Lv2Postprocess(int64_t start_index, int64_t end_index,
     }
 
     for (int j = 0; j < 4; ++j) {
-      if (count_prev[j] >= opt_.min_count) {
+      if (count_prev[j] >= opt_.solid_threshold) {
         has_in = true;
       }
 
-      if (count_next[j] >= opt_.min_count) {
+      if (count_next[j] >= opt_.solid_threshold) {
         has_out = true;
       }
     }
 
-    if (!has_in && count >= opt_.min_count) {
+    if (!has_in && count >= opt_.solid_threshold) {
       for (int64_t j = from_; j < to_; ++j) {
         auto *read_info_ptr =
             substr_ptr + j * (words_per_substr_ + 2) + words_per_substr_;
@@ -337,7 +337,7 @@ void KmerCounter::Lv2Postprocess(int64_t start_index, int64_t end_index,
       }
     }
 
-    if (!has_out && count >= opt_.min_count) {
+    if (!has_out && count >= opt_.solid_threshold) {
       for (int64_t j = from_; j < to_; ++j) {
         auto *read_info_ptr =
             substr_ptr + j * (words_per_substr_ + 2) + words_per_substr_;
@@ -370,9 +370,10 @@ void KmerCounter::Lv2Postprocess(int64_t start_index, int64_t end_index,
     }
     edge_counter_.Add(count, thread_id);
 
-    if (count >= opt_.min_count) {
+    if (count >= opt_.solid_threshold) {
       PackEdge(packed_edge, first_item, count);
-      edge_writer_.Write(packed_edge,
+      edge_writer_.Write(mpienv_,
+                         packed_edge,
                          packed_edge[0] >> (32 - 2 * kBucketPrefixLength),
                          thread_id, &snapshot);
     }
@@ -385,7 +386,7 @@ void KmerCounter::Lv0Postprocess() {
   // --- output reads for mercy ---
   int64_t num_candidate_reads = 0;
   int64_t num_has_tips = 0;
-  std::ofstream candidate_file(opt_.kmerc_output_prefix + ".cand",
+  std::ofstream candidate_file(opt_.output_prefix + ".cand",
                                std::ofstream::binary | std::ofstream::out);
 
   for (size_t i = 0; i < seq_pkg_.seq_count(); ++i) {
@@ -406,8 +407,8 @@ void KmerCounter::Lv0Postprocess() {
   xinfo("Total number of candidate reads: {} ({})\n", num_candidate_reads,
         num_has_tips);
   xinfo("Total number of solid edges: {}\n",
-        edge_counter_.GetNumSolidEdges(opt_.min_count));
-  std::ofstream counting_file(opt_.kmerc_output_prefix + ".counting");
+        edge_counter_.GetNumSolidEdges(opt_.solid_threshold));
+  std::ofstream counting_file(opt_.output_prefix + ".counting");
   edge_counter_.DumpStat(counting_file);
 
   // --- cleaning ---

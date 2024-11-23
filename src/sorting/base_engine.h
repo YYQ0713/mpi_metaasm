@@ -10,6 +10,7 @@
 
 #include "kmsort_selector.h"
 #include "utils/utils.h"
+#include "mpienv/mpienv.hpp"
 
 /**
  * The base class of sequence sorting engine
@@ -24,6 +25,7 @@ class BaseSequenceSortingEngine {
 
   static const unsigned kLv1BytePerItem = 4;  // 32-bit differential offset
   static const int64_t kDifferentialLimit = (1llu << 31u) - 1;
+  MPIEnviroment mpienv_;
 
   struct MemoryStat {
     int64_t num_sequences;
@@ -33,8 +35,12 @@ class BaseSequenceSortingEngine {
   };
 
  public:
+  BaseSequenceSortingEngine(int64_t mem, int mem_flag, int n_threads, MPIEnviroment &mpienv)
+      : host_mem_(mem), mem_flag_(mem_flag), n_threads_(n_threads), mpienv_(mpienv) {};
+
   BaseSequenceSortingEngine(int64_t mem, int mem_flag, int n_threads)
-      : host_mem_(mem), mem_flag_(mem_flag), n_threads_(n_threads){};
+      : host_mem_(mem), mem_flag_(mem_flag), n_threads_(n_threads) {};
+      
   virtual ~BaseSequenceSortingEngine() = default;
 
   /**

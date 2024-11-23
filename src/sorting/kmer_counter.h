@@ -32,15 +32,24 @@
 #include "sequence/io/edge/edge_writer.h"
 #include "sequence/sequence_package.h"
 #include "utils/atomic_wrapper.h"
-#include "common/common.hpp"
+#include "mpienv/mpienv.hpp"
 
+struct KmerCounterOption {
+  unsigned k{21};
+  int solid_threshold{2};
+  double host_mem{0};
+  int n_threads{0};
+  std::string read_lib_file{};
+  std::string output_prefix{"out"};
+  int mem_flag{1};
+};
 
 class KmerCounter : public BaseSequenceSortingEngine {
  public:
   static const unsigned kSentinelValue = 4;
   static const uint32_t kSentinelOffset = 4294967295U;
-  explicit KmerCounter(const GlobalOptions &opt)
-      : BaseSequenceSortingEngine(opt.host_mem(), opt.mem_flag, opt.num_cpu_threads),
+  explicit KmerCounter(const KmerCounterOption &opt, MPIEnviroment &mpienv)
+      : BaseSequenceSortingEngine(opt.host_mem, opt.mem_flag, opt.n_threads, mpienv),
         opt_(opt) {}
   ~KmerCounter() final = default;
 
@@ -63,7 +72,7 @@ class KmerCounter : public BaseSequenceSortingEngine {
   void PackEdge(uint32_t *dest, uint32_t *item, int64_t counting);
 
  private:
-  GlobalOptions opt_;
+  KmerCounterOption opt_;
 
   int words_per_edge_{};  // number of (32-bit) words needed to represent a
                           // (k+1)-mer

@@ -173,17 +173,53 @@ void BaseSequenceSortingEngine::Run() {
   int lv1_iteration = 0;
   lv1_start_bucket_ = 0;
 
+  // prepare mpi rma info
+  int disp_unit;
+  int *iter_info;
+  MPI_Aint iter_info_size;
+  MPI_Win win;
+
+  if (mpienv_.rank == 0){
+    iter_info_size = 1;
+    MPI_Win_allocate_shared(iter_info_size * sizeof(int), sizeof(int), MPI_INFO_NULL, MPI_COMM_WORLD, &iter_info, &win);
+    iter_info[0] = 0;
+  }
+  else{
+    MPI_Win_allocate_shared(0, sizeof(int), MPI_INFO_NULL, MPI_COMM_WORLD, &iter_info, &win);
+    MPI_Win_shared_query(win, 0, &iter_info_size, &disp_unit, &iter_info);
+  }
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  
+  //MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, win);
+  //MPI_Win_unlock(0, win);
+
   while (lv1_start_bucket_ < kNumBuckets) {
     SimpleTimer lv1_timer;
+
+    {
+      // --- finds the bucket range for this iteration ---
+      MPI_Win_lock(MPI_LOCK_EXCLUSIVE, 0, 0, win);
+      if (iter_info[0] == kNumBuckets)
+      {
+        MPI_Win_unlock(0, win);
+        break;
+      }
+      
+      lv1_start_bucket_ = iter_info[0];
+      lv1_end_bucket_ = Lv1FindEndBuckets(lv1_start_bucket_);
+      assert(lv1_start_bucket_ < lv1_end_bucket_);
+      iter_info[0] = lv1_end_bucket_;
+
+      MPI_Win_unlock(0, win);
+    }
+
     lv1_iteration++;
-    // --- finds the bucket range for this iteration ---
-    lv1_end_bucket_ = Lv1FindEndBuckets(lv1_start_bucket_);
-    assert(lv1_start_bucket_ < lv1_end_bucket_);
+    xinfo("Lv1 scanning from bucket {} to {} of rank:{}\n", lv1_start_bucket_,
+          lv1_end_bucket_, mpienv_.rank);
 
     lv1_timer.reset();
     lv1_timer.start();
-    xinfo("Lv1 scanning from bucket {} to {}\n", lv1_start_bucket_,
-          lv1_end_bucket_);
 
     // --- scan to fill offset ---
     Lv1FillOffsetsLaunchMt();
@@ -197,9 +233,10 @@ void BaseSequenceSortingEngine::Run() {
     lv1_timer.stop();
     xinfo("Lv1 fetching & sorting done. Time elapsed: {.4}\n",
           lv1_timer.elapsed());
-    lv1_start_bucket_ = lv1_end_bucket_;
   }
-
+  
+  MPI_Win_free(&win);
+  /*
   lv0_timer.stop();
   xinfo("Main loop done. Time elapsed: {.4}\n", lv0_timer.elapsed());
   lv0_timer.reset();
@@ -208,6 +245,7 @@ void BaseSequenceSortingEngine::Run() {
   Lv0Postprocess();
   lv0_timer.stop();
   xinfo("Postprocess done. Time elapsed: {.4}\n", lv0_timer.elapsed());
+  */
 }
 
 void BaseSequenceSortingEngine::Lv0PrepareThreadPartition() {

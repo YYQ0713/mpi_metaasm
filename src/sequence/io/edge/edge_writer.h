@@ -11,6 +11,7 @@
 
 #include "definitions.h"
 #include "edge_io_meta.h"
+#include "mpienv/mpienv.hpp"
 #include "utils/buffered_reader.h"
 #include "utils/utils.h"
 
@@ -52,20 +53,20 @@ class EdgeWriter {
     metadata_.num_edges = 0;
   }
 
-  void InitFiles() {
+  void InitFiles(MPIEnviroment& mpienv) {
     assert(!is_opened_);
     n_edges_at_thread_.resize(metadata_.num_files, 0);
 
     for (unsigned i = 0; i < metadata_.num_files; ++i) {
       files_.emplace_back(new std::ofstream(
-          (file_prefix_ + ".edges." + std::to_string(i)).c_str(),
+          (file_prefix_ + ".edges." + "rank." + std::to_string(mpienv.rank) + ".threads." + std::to_string(i)).c_str(),
           std::ofstream::binary | std::ofstream::out));
     }
 
     is_opened_ = true;
   }
 
-  void Write(uint32_t *edge_ptr, int32_t bucket, int tid,
+  void Write(MPIEnviroment& mpienv, uint32_t *edge_ptr, int32_t bucket, int tid,
              Snapshot *snapshot) const {
     assert(metadata_.is_sorted);
     if (bucket != snapshot->bucket_id) {
@@ -78,7 +79,7 @@ class EdgeWriter {
     assert(snapshot->bucket_id == bucket);
     assert(snapshot->bucket_info.file_id == tid);
 
-    files_[tid]->write(reinterpret_cast<const char *>(edge_ptr),
+    files_[mpienv.rank * mpienv.nprocs + tid]->write(reinterpret_cast<const char *>(edge_ptr),
                        sizeof(uint32_t) * metadata_.words_per_edge);
     ++snapshot->bucket_info.total_number;
   }
